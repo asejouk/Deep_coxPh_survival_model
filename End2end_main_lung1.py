@@ -21,15 +21,23 @@ from tensorflow.python.tools.inspect_checkpoint import print_tensors_in_checkpoi
 
 np.random.seed(13)
 
+## Imagenet pretrained weights
+
 url = "http://download.tensorflow.org/models/inception_v4_2016_09_09.tar.gz"
+PRETRAINED_SNAPSHOT_DIR = '/app/pretrained_checkpoints/'
+PRETRAINED_SNAPSHOT_FILE = '/app/pretrained_checkpoints/inception_v4.ckpt'
+
+
+# checkpoint folder
+SNAPSHOT_DIR_CH = "/app/trained_checkpoints/inception_v4/lung_output12/"
 SNAPSHOT_FILE = "/app/trained_checkpoints/inception_v4/lung_output12/snapshot_25.ckpt"
 LAST_SNAPSHOT_FILE = "/app/trained_checkpoints/inception_v4/lung_output12/snapshot_24.ckpt"
 
-SNAPSHOT_DIR_CH = "/app/trained_checkpoints/inception_v4/lung_output12/"
+# output folder
 SNAPSHOT_DIR_OU =  '/app/output/inception_v4/lung_output12/'
-PRETRAINED_SNAPSHOT_FILE = '/app/pretrained_checkpoints/inception_v4.ckpt'
-PRETRAINED_SNAPSHOT_DIR = '/app/pretrained_checkpoints/'
 
+
+# create directory
 if not tf.gfile.Exists(PRETRAINED_SNAPSHOT_FILE):
     tf.gfile.MakeDirs(PRETRAINED_SNAPSHOT_DIR)
     dataset_utils.download_and_uncompress_tarball(url, PRETRAINED_SNAPSHOT_DIR)
@@ -58,16 +66,17 @@ post_ct_contour_path = '/app/SRBT/POST_SBRT_CT/CTpet_AO_max_area_tumor_contour/'
 pet_image_path = '/app/SRBT/PRE_SBRT_PETct/PETct_AO_max_area_image/'
 pet_contour_path = '/app/SRBT/PRE_SBRT_PETct/PETct_AO_max_area_tumor_contour/'
 
-
+# Output log files
 output_file = '/app/output/inception_v4/lung_output12/end2end_out_mod_25.txt'
 output_file1 = '/app/output/inception_v4/lung_output12/fold_sample_ind_25.txt'
 log_output = '/app/output/inception_v4/lung_output12/output_25'
 
-
+# list parameters saved in pretrained checkpoint
 print_tensors_in_checkpoint_file(file_name=PRETRAINED_SNAPSHOT_FILE, tensor_name='', all_tensors=False, all_tensor_names=True)
-
 filelist = [f.split('.')[0].split('_')[1] for f in os.listdir(ct_image_path) if f.endswith(".npy")]
 #print(filelist)
+
+## Read label file
 csv_info = pd.read_csv('/app/SRBT/SBRT_mod.csv')
 
 csv_info = csv_info[csv_info['Patient_ID'].isin(filelist)]
@@ -166,12 +175,7 @@ full_pet_image_dataset_path,full_pet_contour_dataset_path,full_ct_image_dataset_
 
 
 
-def bbox2(img):
-    rows = np.any(img, axis=1)
-    cols = np.any(img, axis=0)
-    rmin, rmax = np.where(rows)[0][[0, -1]]
-    cmin, cmax = np.where(cols)[0][[0, -1]]
-    return rmin, rmax, cmin, cmax
+## Initialization function
 
 def initialize_vars(session):
     # INITIALIZE VARS
@@ -234,7 +238,15 @@ def CTpet_fc_initialize_vars(session):
         CTpet_fc_tf_saver.restore(session, LAST_SNAPSHOT_FILE + '_'+str(k_fold_num))
 
 
+def bbox2(img):
+    # crop rectangular tumor image
+    rows = np.any(img, axis=1)
+    cols = np.any(img, axis=0)
+    rmin, rmax = np.where(rows)[0][[0, -1]]
+    cmin, cmax = np.where(cols)[0][[0, -1]]
+    return rmin, rmax, cmin, cmax
 
+######## Pre-processing pipeline
 
 def create_train( image_ct_dataset_path, contour_ct_dataset_path,image_highres_ct_dataset_path, contour_highres_ct_dataset_path,image_post_ct_dataset_path, contour_post_ct_dataset_path, dataset_features, dataset_labels):
     #print(image_pet_dataset_path)
@@ -254,9 +266,6 @@ def create_train( image_ct_dataset_path, contour_ct_dataset_path,image_highres_c
     # POST CT
     post_ct_image, post_ct_contour, slice_num1, slice_num2, slice_num3, slice_num4 = load_train_image( image_post_ct_dataset_path, contour_post_ct_dataset_path, shape)
     post_ct_batch_images1, post_ct_batch_images2, post_ct_batch_images3, post_ct_batch_images4 = format_train_image(post_ct_image, post_ct_contour, slice_num1, slice_num2, slice_num3, slice_num4, shape)
-
-
-
 
     ct_batch_images1 = np.float32(ct_batch_images1)
     ct_batch_images2 = np.float32(ct_batch_images2)
@@ -630,7 +639,6 @@ def ct_augment(image):
     she1 = np.random.choice(range(1,30))
     she2 = np.random.choice(range(30,70))
     augment_img = iaa.Sequential([iaa.Affine(rotate=rot), iaa.OneOf([iaa.Affine(shear=(-she1, she1)) ,iaa.Flipud(0.5)]),iaa.OneOf([iaa.Fliplr(0.5),iaa.Affine(shear=(-she2, she2))])],random_order=True)
-#,iaa.OneOf([iaa.Sharpen(alpha=(0.0, 1.0), lightness=(0.75, 2.0)), iaa.Emboss(alpha=(0.0, 1.0), strength=(0.5, 1.5))])
     image_aug = augment_img.augment_image(image)
 
     return image_aug
@@ -754,7 +762,7 @@ def pet_val_normalize(image):
     return norm_image
 
 
-
+## C_index metric function
 
 def c_index3(month,risk, status):
 
@@ -764,7 +772,7 @@ def c_index3(month,risk, status):
 
 
 
-
+## Output FC layers concatenate all four inception network outputs
 
 def encoder(CTpet_output1, CTpet_output2, CTpet_output3, CTpet_output4, keep_prob, is_training, hidden_layer):
 
@@ -890,6 +898,7 @@ def encoder(CTpet_output1, CTpet_output2, CTpet_output3, CTpet_output4, keep_pro
 
     return end_points
 
+## Loss function
 def negloglik_risk_function(features, month, status):
 
     batch_size = tf.shape(features)[0]
@@ -940,7 +949,7 @@ def negloglik_risk_function(features, month, status):
 
 
 
-
+# selection model output layer (number of features)
 
 def hidden_layer_fun(hidden_layer_size):
     # Death
@@ -970,6 +979,7 @@ def hidden_layer_fun(hidden_layer_size):
         print('hidden_layer check')
     return hidden_layer
 
+## select event of interest
 def event_fun(event):
     # Death
     if event == 'OS':
@@ -997,6 +1007,7 @@ def event_fun(event):
 # RC ==> Reg
 
 
+## Model parameter
 time_index,status_index = event_fun('OS')
 
 hidden_layer_size = 4
@@ -1009,9 +1020,8 @@ keep_prob = 0.8
 
 lam = 0.001
 
-# K Cross val suffle and split
+# K-fold Cross val (suffle and split)
 k_fold_split = 3
-k_fold_num = 0
 
 end_points ={}
 
@@ -1022,6 +1032,9 @@ num_sample_per_fold = int(len(full_ct_image_dataset_path)/k_fold_split)
 templ = np.arange(1,len(full_ct_image_dataset_path)+1)
 open(output_file1, 'w+').close()
 for k_fold_num in range(k_fold_split):
+
+    ## K-fold loop
+
     f1 = open(output_file1, 'a')
     print('k_fold_num ----------------------------',k_fold_num)
     f1.write('k_fold_num ----------------------------'  + str(k_fold_num) + '\n')
@@ -1151,10 +1164,6 @@ for k_fold_num in range(k_fold_split):
 
                     _, CTpet_end_points4 = inception_v4.inception_v4(X4 , is_training = tf_is_training, dropout_keep_prob= keep_prob)
                     CTpet_output4 = CTpet_end_points4['global_pool']
-
-
-            # Encode pictures
-            # Create the model, use the default arg scope to configure the batch norm parameters.
 
 
         tf.summary.image('CTpet1_Input image', tf.expand_dims(X1[:,:,:,0],-1), max_outputs=1)
@@ -1344,7 +1353,7 @@ for k_fold_num in range(k_fold_split):
                     optimize_fc = tf_optimizer_fc.minimize(total_loss ,var_list = train_var_fc, name="fc_train_op")
 
 
-        # PRETRAINED SAVER SETTINGS
+        # PRETRAINED SAVER SETTINGS FROM IMAGENET
         # Lists of scopes of weights to include/exclude from pretrained snapshot
 
         CTpet1_pretrained_include = ['CTpet_output1/InceptionV4/']
@@ -1376,25 +1385,11 @@ for k_fold_num in range(k_fold_split):
             exclude = CTpet4_pretrained_exclude)
 
 
-
-
-
-        pretrained_include = ['CTpet_output1/','CTpet_output2/','CTpet_output3/','CTpet_output4/','FC_layers/']
-        pretrained_exclude = ['CTpet_output1/InceptionV4/AuxLogits', 'CTpet_output1/InceptionV4/Logits/Logits','CTpet_output2/InceptionV4/AuxLogits', 'CTpet_output2/InceptionV4/Logits/Logits','CTpet_output3/InceptionV4/AuxLogits', 'CTpet_output3/InceptionV4/Logits/Logits','CTpet_output4/InceptionV4/AuxLogits', 'CTpet_output4/InceptionV4/Logits/Logits']
-
-        # PRETRAINED SAVER - For loading pretrained weights on the first run
-
-        pretrained_vars = tf.contrib.framework.get_variables_to_restore(
-            include = pretrained_include,
-            exclude = pretrained_exclude)
-
-
         CTpet1_pretrained_vars = {v.name.lstrip('CTpet_output1/').rstrip(':0'): v for v in CTpet1_pretrained_vars}
         CTpet2_pretrained_vars = {v.name.lstrip('CTpet_output2/').rstrip(':0'): v for v in CTpet2_pretrained_vars}
         CTpet3_pretrained_vars = {v.name.lstrip('CTpet_output3/').rstrip(':0'): v for v in CTpet3_pretrained_vars}
         CTpet4_pretrained_vars = {v.name.lstrip('CTpet_output4/').rstrip(':0'): v for v in CTpet4_pretrained_vars}
 
-        #PETct_pretrained_vars = {v.name.lstrip('PETct_output/').rstrip(':0'): v for v in PETct_pretrained_vars}
         print('CTpet1_pretrained_vars-----------------------------------------------------',CTpet1_pretrained_vars)
         #print('CTpet2_pretrained_vars-----------------------------------------------------',CTpet2_pretrained_vars)
 
@@ -1404,7 +1399,7 @@ for k_fold_num in range(k_fold_split):
         CTpet3_tf_imagenet_pretrained_saver = tf.train.Saver(CTpet3_pretrained_vars, name="CTpet3_imagenet_pretrained_saver")
         CTpet4_tf_imagenet_pretrained_saver = tf.train.Saver(CTpet4_pretrained_vars, name="CTpet4_imagenet_pretrained_saver")
 
-        # PRETRAINED SAVER SETTINGS
+        # PRETRAINED SAVER SETTINGS FROM LAST CHECKPOINT
         # Lists of scopes of weights to include/exclude from pretrained snapshot
 
         CTpet1_include = ['CTpet_output1/InceptionV4/']
@@ -1451,6 +1446,16 @@ for k_fold_num in range(k_fold_split):
         CTpet4_tf_saver = tf.train.Saver(CTpet4_vars,name="CTpet4_saver")
         CTpet_fc_tf_saver = tf.train.Saver(CTpet_fc_vars,name="CTpet_fc_saver")
 
+
+
+        pretrained_include = ['CTpet_output1/','CTpet_output2/','CTpet_output3/','CTpet_output4/','FC_layers/']
+        pretrained_exclude = ['CTpet_output1/InceptionV4/AuxLogits', 'CTpet_output1/InceptionV4/Logits/Logits','CTpet_output2/InceptionV4/AuxLogits', 'CTpet_output2/InceptionV4/Logits/Logits','CTpet_output3/InceptionV4/AuxLogits', 'CTpet_output3/InceptionV4/Logits/Logits','CTpet_output4/InceptionV4/AuxLogits', 'CTpet_output4/InceptionV4/Logits/Logits']
+
+        ## PRETRAINED SAVER SETTINGS FROM LAST CHECKPOINT
+
+        pretrained_vars = tf.contrib.framework.get_variables_to_restore(
+            include = pretrained_include,
+            exclude = pretrained_exclude)
         #pretrained_saver = tf.train.Saver(pretrained_vars, name="pretrained_saver")
         tf_saver = tf.train.Saver(pretrained_vars, name="saver")
 
@@ -1462,7 +1467,6 @@ for k_fold_num in range(k_fold_split):
         config.gpu_options.allow_growth = True
 
         with tf.Session(config = config) as sess:
-        #with tf.Session() as sess:
             sess.run(init)
             initialize_vars(session=sess)
             CTpet1_initialize_vars(session=sess)
@@ -1539,8 +1543,6 @@ for k_fold_num in range(k_fold_split):
                     summary.value.add(tag='learning_rate', simple_value= learning_rate)
                     summary.value.add(tag='keep_prob', simple_value= keep_prob)
                     summary.value.add(tag='minibatch_size', simple_value= minibatch_size)
-
-                    #for key, value in train_c_indices.items():
 
                     summary.value.add(tag='train total loss ' +str(hidden_layer) , simple_value= epoch_loss)
                     summary.value.add(tag='train nllk cost ' +str(hidden_layer) , simple_value= epoch_cost)
